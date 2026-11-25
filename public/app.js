@@ -5,7 +5,28 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const store = { get(k, d) { try { const v = localStorage.getItem("fd:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set(k, v) { try { localStorage.setItem("fd:" + k, JSON.stringify(v)); } catch {} } };
 const S = Object.assign({ hair: "", porous: false, place: null, bias: 0, ratings: {}, remind: { on: false, hour: 7, eve: 19 }, seen: {} }, store.get("s", {}));
 if (S.remind.eve == null) S.remind.eve = 19; if (!S.seen) S.seen = {};
-const save = () => store.set("s", S);
+const save = () => { store.set("s", S); saveRestore(); };
+/* iPhone gives Home Screen apps their own storage, so the app's start link carries this phone's setup along. */
+const b64url = o => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+function saveRestore() {
+  try {
+    const c = S.hair && S.place ? b64url({ h: S.hair, p: S.porous ? 1 : 0, n: S.place.name, a: S.place.lat, o: S.place.lon, b: Math.round(S.bias * 100) / 100,
+      t: S.trip ? { n: S.trip.place.name, a: S.trip.place.lat, o: S.trip.place.lon, f: S.trip.from, e: S.trip.to, k: S.trip.kind || "trip", l: S.trip.label || "" } : 0 }) : "";
+    localStorage.setItem("fd:restore", JSON.stringify(c));
+    const l = document.querySelector('link[rel="manifest"]'); if (l) l.href = c ? "/app.webmanifest?s=" + c : "/manifest.webmanifest";
+  } catch {}
+}
+(() => {
+  const raw = new URLSearchParams(location.search).get("restore"); if (!raw) return;
+  try { history.replaceState(null, "", "/"); } catch {}
+  if (S.hair && S.place) return;
+  try {
+    const o = JSON.parse(decodeURIComponent(escape(atob(raw.replace(/-/g, "+").replace(/_/g, "/")))));
+    if (o.h && isFinite(o.a) && isFinite(o.o)) { S.hair = String(o.h); S.porous = !!o.p; S.place = { name: String(o.n || "My city").slice(0, 60), lat: +o.a, lon: +o.o }; S.bias = Math.max(-3, Math.min(3, +o.b || 0)); }
+    if (o.t && isFinite(o.t.a)) S.trip = { place: { name: String(o.t.n || "").slice(0, 60), lat: +o.t.a, lon: +o.t.o }, from: o.t.f, to: o.t.e, kind: o.t.k || "trip", label: String(o.t.l || "").slice(0, 40) };
+    store.set("s", S);
+  } catch {}
+})();
 const LV = ["--l0", "--l1", "--l2", "--l3", "--l4"];
 
 /* hair type tiles */
@@ -81,7 +102,7 @@ function showForecast() {
   const has = !!(S.place && S.hair);
   $("#intro").hidden = has; $("#setup").hidden = has;
   ["#hero", "#hourlyCard", "#tipsCard", "#daysCard", "#rateCard", "#remindCard", "#actions", "#tripCard", "#whyCard", "#placeBtn"].forEach(s => $(s).hidden = !has);
-  if (has) $("#placeName").textContent = S.place.name;
+  if (has) $("#placeName").textContent = S.place.name.split(",")[0];
 }
 function render() {
   const now = localNow();
@@ -361,7 +382,7 @@ $("#remindToggle").addEventListener("click", async () => {
     try { const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription(); if (sub) await fetch("/api/remind", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "off", subscription: sub.toJSON() }) }); } catch {}
     return;
   }
-  if (!pushOK()) { if (IOS && !standalone) openInstall(); else toast("Notifications aren't available in this browser"); return; }
+  if (!pushOK()) { if (IOS && !standalone) openInstall("notify"); else toast("Notifications aren't available in this browser"); return; }
   if (await Notification.requestPermission() !== "granted") { $("#remindNote").textContent = "Notifications are blocked for FrizzDay. Allow them in your settings, then try again."; return; }
   S.remind.on = true; save(); renderRemind(); await sync(true); if (S.remind.on) toast("You're set. Check for a test notification.");
 });
@@ -375,20 +396,56 @@ $("#changeHair").addEventListener("click", () => editSetup());
 $("#resetTune").addEventListener("click", () => { S.bias = 0; S.ratings = {}; save(); render(); scheduleSync(); toast("Tuning reset."); });
 function editSetup() { $("#setup").hidden = false; $("#setup").scrollIntoView({ behavior: "smooth", block: "start" }); }
 
-/* install */
-function openInstall() {
-  const steps = IOS ? ["Tap the <b>Share</b> button in Safari.", "Tap <b>Add to Home Screen</b>.", "Tap <b>Add</b>. FrizzDay opens like an app."] : ANDROID ? ["Tap the <b>⋮</b> menu in Chrome.", "Tap <b>Add to Home screen</b> or <b>Install app</b>."] : ["Click the install icon in your browser's address bar."];
-  $("#instSteps").innerHTML = `<ol>${steps.map(s => `<li>${s}</li>`).join("")}</ol>`; $("#sheetBack").hidden = $("#installSheet").hidden = false;
+/* install: the simplest possible steps, with an arrow pointing at the button to tap */
+const IN_APP = /FBAN|FBAV|FB_IAB|FBIOS|Instagram|Line\/|Snapchat|TikTok|musical_ly|LinkedInApp|Twitter|Pinterest|GSA\//.test(ua);
+const IOS_BROWSER = /CriOS/.test(ua) ? "chrome" : /FxiOS/.test(ua) ? "firefox" : /EdgiOS/.test(ua) ? "edge" : "safari";
+const SAFARI_V = +((ua.match(/Version\/(\d+)/) || [])[1] || 0), IPAD = /iPad/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const IC = {
+  share: '<svg viewBox="0 0 24 24" class="ico"><path d="M12 3v12M7 8l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 11H5v10h14V11h-1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  dots: '<svg viewBox="0 0 24 24" class="ico"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>',
+  add: '<svg viewBox="0 0 24 24" class="ico"><rect x="4" y="4" width="16" height="16" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
+};
+const istep = (n, h) => `<li class="istep"><span class="inum">${n}</span><span>${h}</span></li>`;
+function guide(reason) {
+  const why = `<p class="iwhy">${reason === "notify" ? "iPhone only sends notifications to apps on your Home Screen." : "Free. No App Store. About 10 seconds."}${S.hair && S.place ? " Your hair settings come with you." : ""}</p>`;
+  if (IOS && IN_APP) return { html: `${why}<ol class="isteps">${istep(1, "This page is open inside another app. Tap <b>Copy link</b>.")}${istep(2, "Open <b>Safari</b>, paste it, and tap <b>Get the app</b> again.")}</ol><button class="btn berry" id="icopy" type="button" style="width:100%;margin-top:12px">Copy link</button>`, arrow: null };
+  if (IOS && IOS_BROWSER !== "safari") return { html: `${why}<ol class="isteps">${istep(1, `Tap ${IC.share} <b>Share</b> ${IOS_BROWSER === "chrome" ? "in the address bar" : "in the menu"}.`)}${istep(2, `Tap ${IC.add} <b>Add to Home Screen</b>, then <b>Add</b>.`)}</ol>`, arrow: IOS_BROWSER === "chrome" ? "topright" : "bottomright" };
+  if (IOS) {
+    const n26 = SAFARI_V >= 26;
+    return { html: `${why}<ol class="isteps">${istep(1, n26 ? `Tap ${IC.dots} at the bottom right, then ${IC.share} <b>Share</b>.` : `Tap ${IC.share} <b>Share</b> ${IPAD ? "at the top" : "at the bottom"}.`)}${istep(2, `Tap ${IC.add} <b>Add to Home Screen</b>, then <b>Add</b>.`)}</ol>${n26 ? `<p class="inote">Don't see Add to Home Screen? Scroll down in that menu.</p>` : ""}`, arrow: IPAD ? "topright" : n26 ? "bottomright" : "bottom" };
+  }
+  if (ANDROID) return { html: `<ol class="isteps">${istep(1, "Tap the <b>⋮</b> menu at the top right.")}${istep(2, "Tap <b>Install app</b> or <b>Add to Home screen</b>.")}</ol>`, arrow: "topright" };
+  return { html: `<ol class="isteps">${istep(1, "On your phone, open <b>frizzday.com</b> and tap <b>Get the app</b>.")}</ol>`, arrow: null };
 }
-const closeInstall = () => { $("#sheetBack").hidden = $("#installSheet").hidden = true; };
-$("#installBtn").hidden = !!standalone;
-$("#installBtn").addEventListener("click", async () => { const p = window.__bip; if (p) { try { p.prompt(); const r = await p.userChoice; window.__bip = null; if (r?.outcome === "accepted") { $("#installBtn").hidden = true; return; } } catch {} } openInstall(); });
-$("#instClose").addEventListener("click", closeInstall); $("#sheetBack").addEventListener("click", closeInstall);
+function openInstall(reason) {
+  // the Home Screen app should start with this phone's settings: reload once if they changed since the page opened
+  const want = (() => { try { return JSON.parse(localStorage.getItem("fd:restore") || '""') || ""; } catch { return ""; } })();
+  if (IOS && !IN_APP && want !== (window.__mf || "")) { try { sessionStorage.setItem("fd:reopen", reason || "1"); } catch {} location.reload(); return; }
+  const g = guide(reason), ptr = $("#instPointer");
+  $("#instTitle").textContent = reason === "notify" ? "First, add FrizzDay to your Home Screen" : "Get FrizzDay on your phone";
+  $("#instSteps").innerHTML = g.html; ptr.className = "pointer " + (g.arrow || ""); ptr.hidden = !g.arrow;
+  const c = $("#icopy"); if (c) c.onclick = async () => { try { await navigator.clipboard.writeText("https://frizzday.com/"); toast("Copied. Now open Safari and paste it."); } catch { prompt("Copy this link:", "https://frizzday.com/"); } };
+  $("#sheetBack").hidden = $("#installSheet").hidden = false;
+}
+const closeInstall = () => { $("#sheetBack").hidden = $("#installSheet").hidden = $("#welcomeSheet").hidden = true; $("#instPointer").hidden = true; };
+async function getApp() { const p = window.__bip; if (p) { try { window.__bip = null; await p.prompt(); const r = await p.userChoice; if (r?.outcome === "accepted") { $("#getApp").hidden = $("#installBtn").hidden = true; return; } if (r?.outcome === "dismissed") return; } catch {} } openInstall(); }
+$("#getApp").hidden = $("#installBtn").hidden = !!standalone;
+$("#getApp").addEventListener("click", getApp); $("#installBtn").addEventListener("click", getApp);
+$("#instClose").addEventListener("click", closeInstall); $("#sheetBack").addEventListener("click", closeInstall); $("#welClose").addEventListener("click", closeInstall);
+window.addEventListener("appinstalled", () => { $("#getApp").hidden = $("#installBtn").hidden = true; closeInstall(); });
+try { const r = sessionStorage.getItem("fd:reopen"); if (r) { sessionStorage.removeItem("fd:reopen"); setTimeout(() => openInstall(r === "notify" ? "notify" : undefined), 400); } } catch {}
+/* first open from the Home Screen: offer the morning forecast (this tap counts as permission on iPhone) */
+if (standalone && !store.get("welcomed", false)) {
+  store.set("welcomed", true);
+  if (S.hair && S.place && !S.remind.on) setTimeout(() => { $("#sheetBack").hidden = $("#welcomeSheet").hidden = false; }, 900);
+}
+$("#welOn").addEventListener("click", () => { closeInstall(); $("#remindToggle").click(); });
 
 let tt; function toast(m) { let t = $(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); } t.textContent = m; t.hidden = false; clearTimeout(tt); tt = setTimeout(() => t.hidden = true, 2600); }
 
 if ("serviceWorker" in navigator && location.protocol === "https:") window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
 
 /* boot */
+saveRestore();
 if (S.place && S.hair) load(false).then(() => { if (window.__sharedTrip) { window.__sharedTrip = false; setTimeout(() => $("#tripCard").scrollIntoView({ behavior: "smooth", block: "start" }), 300); toast("Added to your FrizzDay"); } }); else showForecast();
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && data && S.place) { const c = store.get("wx", null); if (!c || Date.now() - c.at > 30 * 6e4) load(true); else render(); } });

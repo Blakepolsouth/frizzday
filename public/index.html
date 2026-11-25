@@ -16,8 +16,8 @@
 <meta property="og:description" content="Your hair's daily forecast, by hair type. Based on dew point, the thing that actually causes frizz.">
 <meta property="og:image" content="https://frizzday.com/og.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="manifest" href="/manifest.webmanifest">
-<script>window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.__bip=e;});</script>
+<script>(function(){var c="";try{c=JSON.parse(localStorage.getItem("fd:restore")||'""')||"";}catch(e){}var l=document.createElement("link");l.rel="manifest";l.href=c&&/^[A-Za-z0-9_-]{1,3000}$/.test(c)?"/app.webmanifest?s="+c:"/manifest.webmanifest";window.__mf=c;document.head.appendChild(l);})();
+window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.__bip=e;});</script>
 <link rel="icon" href="/icon-192.png">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,7 +29,10 @@
 <div class="wrap">
   <header class="top">
     <a class="logo" href="/" aria-label="FrizzDay home">frizz<em>day</em><svg viewBox="0 0 24 12" aria-hidden="true"><path d="M1 6c2.5-5 5-5 7.3 0s4.8 5 7.3 0 4.8-5 7.3 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></a>
+    <div class="topright">
+    <button class="getapp" id="getApp" type="button" hidden aria-label="Get the free FrizzDay app"><img src="/icon-192.png" alt="" width="26" height="26"><span>Get the app<small>Free</small></span></button>
     <button class="place" id="placeBtn" type="button" hidden><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z" fill="currentColor"/></svg><span id="placeName"></span></button>
+    </div>
   </header>
 
   <!-- First visit -->
@@ -115,7 +118,9 @@
 </div>
 
 <div class="sheetback" id="sheetBack" hidden></div>
-<div class="sheet" id="installSheet" hidden role="dialog" aria-modal="true" aria-labelledby="instTitle"><button class="x" id="instClose" type="button" aria-label="Close">✕</button><h3 id="instTitle">Put FrizzDay on your home screen</h3><div id="instSteps"></div></div>
+<div class="sheet" id="installSheet" hidden role="dialog" aria-modal="true" aria-labelledby="instTitle"><button class="x" id="instClose" type="button" aria-label="Close">✕</button><h3 id="instTitle">Get FrizzDay on your phone</h3><div id="instSteps"></div></div>
+<div class="pointer" id="instPointer" hidden aria-hidden="true"><svg viewBox="0 0 40 56"><path d="M20 54V6M6 40l14 14 14-14" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+<div class="sheet" id="welcomeSheet" hidden role="dialog" aria-modal="true" aria-labelledby="welTitle"><button class="x" id="welClose" type="button" aria-label="Close">✕</button><h3 id="welTitle">You're in 💁</h3><p id="welTxt" style="margin:10px 0 14px">FrizzDay is on your phone. Want your frizz score every morning, before you pick up the dryer?</p><button class="btn berry" id="welOn" type="button" style="width:100%">Yes, send my morning forecast</button></div>
 <script type="module" src="/app.js"></script>
 </body>
 </html>
