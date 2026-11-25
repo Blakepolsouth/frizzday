@@ -22,13 +22,14 @@ export default async (req) => {
     subscription: { endpoint: b.subscription.endpoint, keys: { p256dh: b.subscription.keys.p256dh, auth: b.subscription.keys.auth } },
     lat: +(+b.lat).toFixed(2), lon: +(+b.lon).toFixed(2), name: String(b.name || "").replace(/[<>\u0000-\u001f]/g, "").slice(0, 60),
     hair: HAIR[b.hair] ? b.hair : "wavy", porous: !!b.porous, bias: Math.max(-3, Math.min(3, +b.bias || 0)),
-    hour: [5, 6, 7, 8, 9, 10].includes(+b.hour) ? +b.hour : 7, tz: validTz(b.tz) ? b.tz : "America/New_York",
+    hour: [0, 5, 6, 7, 8, 9, 10].includes(+b.hour) ? +b.hour : 7, eve: [0, 17, 18, 19, 20, 21].includes(+b.eve) ? +b.eve : b.eve == null ? 19 : 0,
+    lastRated: /^\d{4}-\d{2}-\d{2}$/.test(b.lastRated || "") ? b.lastRated : prev?.lastRated || "", lastEve: prev?.lastEve || "", tz: validTz(b.tz) ? b.tz : "America/New_York",
     lastSent: prev?.lastSent || "", updated: Date.now()
   };
   await store.setJSON(id, rec);
   if (b.confirm) {
     webpush.setVapidDetails(SITE, keys.publicKey, keys.privateKey);
-    try { await webpush.sendNotification(rec.subscription, JSON.stringify({ title: "You're on the frizz list 💁", body: `Your forecast lands every morning at ${rec.hour}:00 AM. Your hair will finally have a heads-up.`, tag: "fd-confirm", url: "/" }), { TTL: 3600 }); }
+    try { await webpush.sendNotification(rec.subscription, JSON.stringify({ title: "You're on the frizz list 💁", body: rec.hour ? `Your forecast lands every morning at ${rec.hour}:00 AM.${rec.eve ? ` At ${rec.eve - 12} PM we'll ask how your hair did, so FrizzDay learns you.` : ""}` : `We'll check in at ${rec.eve - 12} PM to ask how your hair did, so FrizzDay learns you.`, tag: "fd-confirm", url: "/" }), { TTL: 3600 }); }
     catch (e) { if (e && (e.statusCode === 404 || e.statusCode === 410)) { await store.delete(id); return json({ error: "expired" }, 410); } }
   }
   return json({ ok: true });

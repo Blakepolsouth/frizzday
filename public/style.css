@@ -135,3 +135,16 @@ footer p{margin:0}
 .sheet ol{margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:8px}
 .x{float:right;border:0;background:var(--sunk);border-radius:50%;width:32px;height:32px}
 @media (prefers-reduced-motion:no-preference){.hero,.card{animation:up .35s ease both}@keyframes up{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}.ring circle.arc{transition:stroke-dashoffset .8s ease}}
+
+/* rating check-in */
+.ratesub{margin:-4px 0 0;font-size:15px;color:var(--muted)}
+.rate.ask{border:2px solid var(--berry);box-shadow:0 10px 30px -12px color-mix(in srgb,var(--berry) 45%,transparent)}
+.rate.ask h2{font-size:30px}
+.rate.ask .rates button{padding:16px 4px}
+.rate.ask .rates button span{font-size:34px}
+.rate.done .rates button:not([aria-pressed="true"]){opacity:.55}
+.learn{display:flex;flex-direction:column;gap:6px}
+.learn .dots{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.learn .dots i{height:8px;border-radius:99px;background:var(--sunk);border:1px solid var(--line)}
+.learn .dots i.on{background:var(--berry);border-color:var(--berry)}
+.learn small{font-size:13px;color:var(--muted);font-weight:600}

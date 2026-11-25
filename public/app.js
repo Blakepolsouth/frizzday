@@ -3,7 +3,8 @@ import { HAIR, hourScore, toDays, dayScore, verdict, tips, level, LEVEL_NAMES, f
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const store = { get(k, d) { try { const v = localStorage.getItem("fd:" + k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set(k, v) { try { localStorage.setItem("fd:" + k, JSON.stringify(v)); } catch {} } };
-const S = Object.assign({ hair: "", porous: false, place: null, bias: 0, ratings: {}, remind: { on: false, hour: 7 } }, store.get("s", {}));
+const S = Object.assign({ hair: "", porous: false, place: null, bias: 0, ratings: {}, remind: { on: false, hour: 7, eve: 19 }, seen: {} }, store.get("s", {}));
+if (S.remind.eve == null) S.remind.eve = 19; if (!S.seen) S.seen = {};
 const save = () => store.set("s", S);
 const LV = ["--l0", "--l1", "--l2", "--l3", "--l4"];
 
@@ -111,6 +112,8 @@ function render() {
   $("#days").innerHTML = days.slice(1, 4).map((x, i) => { const s = dayScore(x, S.hair, S.porous, S.bias); const l = level(s.score);
     return `<button type="button" class="dcard" data-d="${i + 1}" style="--lv:var(${LV[l]})"><span>${i === 0 ? "Tomorrow" : new Date(x.date + "T12:00").toLocaleDateString("en-US", { weekday: "short" })}</span><b>${Math.round(s.score)}</b><span>${LEVEL_NAMES[l]}</span></button>`; }).join("");
 
+  const tds = sel === 0 ? ds : dayScore(days[0], S.hair, S.porous, S.bias);
+  if (days[0].date === now.date && tds) { const prev = S.seen[now.date], sc = Math.round(tds.score * 10) / 10; if (!prev || prev.s !== sc) { S.seen[now.date] = { s: sc, b: S.bias }; const k = Object.keys(S.seen).sort(); while (k.length > 30) delete S.seen[k.shift()]; save(); } }
   renderRate(); renderRemind();
 }
 $("#hero").addEventListener("click", e => {
@@ -121,20 +124,45 @@ $("#days").addEventListener("click", e => { const t = e.target.closest("[data-d]
 
 /* rate your hair: teaches FrizzDay your hair */
 function todayScore(bias = S.bias) { const n = localNow(), d = toDays(data).find(x => x.date === n.date); return d ? dayScore(d, S.hair, S.porous, bias)?.score ?? 0 : 0; }
+const GOAL = 7;
+const addDays = (date, k) => new Date(Date.parse(date + "T12:00:00Z") + k * 864e5).toISOString().slice(0, 10);
+let askDate = new URLSearchParams(location.search).get("rate"); // opened from the evening check-in
+if (askDate) history.replaceState(null, "", location.pathname);
+let justRated = null;
+function rateTarget() {
+  const n = localNow(), yest = addDays(n.date, -1);
+  if (askDate === n.date || (askDate === yest && S.seen[yest])) return { date: askDate, ask: !S.ratings[askDate] || justRated === askDate };
+  if (justRated === yest || (n.hour < 11 && S.seen[yest] && !S.ratings[yest] && !S.ratings[n.date])) return { date: yest, ask: true };
+  return { date: n.date, ask: n.hour >= 16 && (!S.ratings[n.date] || justRated === n.date) };
+}
+function streak() { const n = localNow(); let d = S.ratings[n.date] ? n.date : addDays(n.date, -1), k = 0; while (S.ratings[d]) { k++; d = addDays(d, -1); } return k; }
 function renderRate() {
-  const n = localNow(), r = S.ratings[n.date], count = Object.keys(S.ratings).length;
-  $("#rateTitle").textContent = n.hour < 12 ? "How's your hair this morning?" : "How did your hair do today?";
+  const n = localNow(), T = rateTarget(), r = S.ratings[T.date], count = Object.keys(S.ratings).length, isY = T.date !== n.date;
+  const said = isY ? S.seen[T.date]?.s : todayScore(r ? r.before : S.bias);
+  const card = $("#rateCard"); card.classList.toggle("ask", T.ask); card.classList.toggle("done", !!r);
+  if (T.ask) $("#hero").before(card); else $("#daysCard").after(card);
+  $("#rateKicker").textContent = r ? "Logged. Thank you!" : count < GOAL ? `Teach FrizzDay your hair · day ${count + 1} of ${GOAL}` : "Daily hair check";
+  $("#rateTitle").textContent = isY ? "How did your hair do yesterday?" : n.hour < 12 ? "How's your hair this morning?" : "How did your hair do today?";
+  $("#rateSub").textContent = r ? (r.r === 1 ? "Great hair day, logged." : r.r === 2 ? "Okay day, logged." : "Frizz day, logged.") + " Tap another face to change it."
+    : said != null ? `We called it ${Math.round(said)} out of 10${isY ? " yesterday" : " today"}. Were we right? One tap makes tomorrow's forecast more accurate for you.` : "One tap makes your forecast more accurate.";
   $$(".rates button").forEach(b => b.setAttribute("aria-pressed", String(!!r && r.r === +b.dataset.r)));
+  const on = Math.min(count, GOAL), st = streak();
+  $("#learn").innerHTML = `<div class="dots" aria-hidden="true">${Array.from({ length: GOAL }, (_, i) => `<i${i < on ? ' class="on"' : ""}></i>`).join("")}</div>
+    <small>${count >= GOAL ? `Fully tuned to your hair · ${count} days logged` : count ? `Learning your hair: ${count} of ${GOAL} days. ${GOAL - count} more and it's tuned to you.` : `Rate ${GOAL} days and FrizzDay learns exactly when <i>your</i> hair frizzes.`}${st >= 2 ? ` · 🔥 ${st}-day streak` : ""}</small>`;
   const fp = frizzPoint(S.hair, S.porous, S.bias);
-  $("#tuned").innerHTML = count ? `Tuned to your hair (${count} rating${count > 1 ? "s" : ""}). Your hair starts to frizz around <b>dew point ${fp}°F</b>.` : `Rate your hair for a few days and FrizzDay learns exactly when <i>your</i> hair starts to frizz.`;
+  $("#tuned").innerHTML = count ? `So far, your hair starts to frizz around <b>dew point ${fp}°F</b>.` : "";
+  $("#tuned").hidden = !count;
 }
 $(".rates").addEventListener("click", e => {
   const b = e.target.closest("button[data-r]"); if (!b || !data) return;
-  const n = localNow(), prev = S.ratings[n.date], before = prev ? prev.before : S.bias, score = todayScore(before), rate = +b.dataset.r;
-  S.bias = tune(before, score, rate); S.ratings[n.date] = { r: rate, score, before };
+  const n = localNow(), T = rateTarget(), date = T.date, prev = S.ratings[date], rate = +b.dataset.r;
+  const before = prev ? prev.before : date === n.date ? S.bias : (S.seen[date]?.b ?? S.bias);
+  const score = date === n.date ? todayScore(before) : (S.seen[date]?.s ?? todayScore(before));
+  S.bias = tune(before, score, rate); S.ratings[date] = { r: rate, score, before }; justRated = date;
   const keys = Object.keys(S.ratings).sort(); while (keys.length > 120) delete S.ratings[keys.shift()];
   save(); render(); scheduleSync();
-  toast(rate === 3 && score < 5 ? "Noted. We'll be stricter for your hair." : rate === 1 && score > 5 ? "Lucky! We'll go easier on your hair." : "Got it. Thanks!");
+  const count = Object.keys(S.ratings).length;
+  toast(rate === 3 && score < 5 ? "Noted. We'll be stricter for your hair." : rate === 1 && score > 5 ? "Lucky! We'll go easier on your hair." : count < GOAL ? `Got it. ${count} of ${GOAL} days, FrizzDay is learning you.` : "Got it. Thanks!");
 });
 
 /* share card */
@@ -168,8 +196,9 @@ const standalone = matchMedia("(display-mode: standalone)").matches || navigator
 const ua = navigator.userAgent, IOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1), ANDROID = /Android/.test(ua);
 const b64 = s => { const p = "=".repeat((4 - s.length % 4) % 4), r = atob((s + p).replace(/-/g, "+").replace(/_/g, "/")); return Uint8Array.from(r, c => c.charCodeAt(0)); };
 function renderRemind() {
-  $("#remindToggle").setAttribute("aria-checked", String(!!S.remind.on)); $("#remindTimeRow").hidden = !S.remind.on; $("#remindTime").value = String(S.remind.hour);
-  $("#remindNote").textContent = !pushOK() ? (IOS && !standalone ? "On iPhone, add FrizzDay to your home screen first (button below), then turn this on." : "This browser can't send notifications.") : S.remind.on ? `Every morning at ${S.remind.hour}:00 AM, ${S.place?.name || "your"} time.` : "";
+  $("#remindToggle").setAttribute("aria-checked", String(!!S.remind.on)); $("#remindTimeRow").hidden = $("#eveTimeRow").hidden = !S.remind.on; $("#remindTime").value = String(S.remind.hour); $("#eveTime").value = String(S.remind.eve);
+  const parts = [S.remind.hour ? `your forecast at ${S.remind.hour}:00 AM` : "", S.remind.eve ? `a hair check at ${S.remind.eve - 12}:00 PM (only if you haven't rated yet)` : ""].filter(Boolean);
+  $("#remindNote").textContent = !pushOK() ? (IOS && !standalone ? "On iPhone, add FrizzDay to your home screen first (button below), then turn this on." : "This browser can't send notifications.") : S.remind.on ? (parts.length ? `You'll get ${parts.join(" and ")}.` : "Both are off. Pick a time above.") : "";
 }
 async function subscription() {
   const reg = await navigator.serviceWorker.ready; let sub = await reg.pushManager.getSubscription();
@@ -182,7 +211,7 @@ async function sync(confirm) {
   try {
     const sub = await subscription();
     const r = await fetch("/api/remind", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "on", subscription: sub.toJSON(), confirm: !!confirm,
-      lat: S.place.lat, lon: S.place.lon, name: S.place.name, hair: S.hair, porous: S.porous, bias: S.bias, hour: S.remind.hour, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
+      lat: S.place.lat, lon: S.place.lon, name: S.place.name, hair: S.hair, porous: S.porous, bias: S.bias, hour: S.remind.hour, eve: S.remind.eve, lastRated: Object.keys(S.ratings).sort().pop() || "", tz: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
     if (r.status === 410) { await sub.unsubscribe(); return sync(confirm); }
     if (!r.ok) throw 0;
   } catch { if (confirm) { S.remind.on = false; save(); renderRemind(); toast("Couldn't turn that on. Try again in a moment."); } }
@@ -198,6 +227,7 @@ $("#remindToggle").addEventListener("click", async () => {
   S.remind.on = true; save(); renderRemind(); await sync(true); if (S.remind.on) toast("You're set. Check for a test notification.");
 });
 $("#remindTime").addEventListener("change", e => { S.remind.hour = +e.target.value; save(); renderRemind(); scheduleSync(); });
+$("#eveTime").addEventListener("change", e => { S.remind.eve = +e.target.value; save(); renderRemind(); scheduleSync(); });
 
 /* settings */
 $("#placeBtn").addEventListener("click", () => editSetup());
