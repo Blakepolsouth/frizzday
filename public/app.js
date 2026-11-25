@@ -57,7 +57,7 @@ $("#sugg").addEventListener("click", e => {
   setPlace({ name: `${x.name}${abbr ? ", " + abbr : ""}`, lat: +x.latitude.toFixed(3), lon: +x.longitude.toFixed(3) });
 });
 const US = { Alabama: "AL", Alaska: "AK", Arizona: "AZ", Arkansas: "AR", California: "CA", Colorado: "CO", Connecticut: "CT", Delaware: "DE", Florida: "FL", Georgia: "GA", Hawaii: "HI", Idaho: "ID", Illinois: "IL", Indiana: "IN", Iowa: "IA", Kansas: "KS", Kentucky: "KY", Louisiana: "LA", Maine: "ME", Maryland: "MD", Massachusetts: "MA", Michigan: "MI", Minnesota: "MN", Mississippi: "MS", Missouri: "MO", Montana: "MT", Nebraska: "NE", Nevada: "NV", "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", Ohio: "OH", Oklahoma: "OK", Oregon: "OR", Pennsylvania: "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", Tennessee: "TN", Texas: "TX", Utah: "UT", Vermont: "VT", Virginia: "VA", Washington: "WA", "West Virginia": "WV", Wisconsin: "WI", Wyoming: "WY", "District of Columbia": "DC" };
-function setPlace(p) { S.place = p; save(); setErr(""); $("#geoBtn").textContent = "Use my location"; $("#cityInput").value = ""; $("#sugg").hidden = true; load(true); scheduleSync(); }
+function setPlace(p) { S.place = p; save(); setErr(""); $("#geoBtn").textContent = "Use my location"; $("#cityInput").value = ""; $("#sugg").hidden = true; $("#invite").hidden = true; load(true).then(() => { if (window.__sharedTrip) { window.__sharedTrip = false; setTimeout(() => $("#tripCard").scrollIntoView({ behavior: "smooth", block: "start" }), 300); } }); scheduleSync(); }
 
 /* forecast */
 let data = null, days = [], sel = 0;
@@ -167,6 +167,9 @@ $(".rates").addEventListener("click", e => {
 
 /* trip: frizz forecast for where you're headed */
 const TRIP_DAYS = 16; // how far ahead the forecast reaches
+const KINDS = [["trip", "✈️ Trip"], ["wedding", "💍 Wedding"], ["concert", "🎤 Concert"], ["game", "🏈 Game day"], ["prom", "💃 Prom"], ["grad", "🎓 Graduation"], ["other", "✨ Something else"]];
+const KIND_EMOJI = Object.fromEntries(KINDS.map(([k, n]) => [k, n.split(" ")[0]]));
+const tripName = t => t.label || (t.kind && t.kind !== "trip" && t.kind !== "other" ? KINDS.find(k => k[0] === t.kind)[1].replace(/^\S+ /, "") + " in " + t.place.name.split(",")[0] : t.place.name.split(",")[0]);
 let tripData = null, tripSt, tripDraft = null;
 const tripURL = (lat, lon) => forecastURL(lat, lon).replace("forecast_days=4", "forecast_days=" + TRIP_DAYS);
 const fmtD = (s, o = { weekday: "short", month: "short", day: "numeric" }) => new Date(s + "T12:00").toLocaleDateString("en-US", o);
@@ -187,12 +190,15 @@ function renderTrip() {
     $("#tripTitle").textContent = "Taking your hair on a trip?";
     body.innerHTML = `<p class="tripsub">Add where you're going and your dates. You'll get a frizz score for each day you're there, plus what to pack.</p>
       <div class="search"><input id="tripCity" type="search" placeholder="Where are you headed?" autocomplete="off" aria-label="Trip city" value="${esc(d.place?.name || "")}"><ul class="sugg" id="tripSugg" hidden></ul></div>
+      <div class="tripdates"><label><span>What's the occasion?</span><select id="tripKind">${KINDS.map(([k, n]) => `<option value="${k}"${(d.kind || "trip") === k ? " selected" : ""}>${n}</option>`).join("")}</select></label>
+        <label><span>Name it (optional)</span><input id="tripLabel" maxlength="40" placeholder="Sarah's wedding" value="${esc(d.label || "")}"></label></div>
       <div class="tripdates"><label><span>Arrive</span><input type="date" id="tripFrom" value="${d.from}" min="${today}" max="${maxD}"></label><label><span>Leave</span><input type="date" id="tripTo" value="${d.to}" min="${today}"></label></div>
       <button class="btn" id="tripSave" type="button">See my trip forecast</button><p class="note" id="tripErr" hidden></p>`;
     return;
   }
   const nights = Math.round((Date.parse(t.to) - Date.parse(t.from)) / 864e5);
-  $("#tripTitle").textContent = `${t.place.name.split(",")[0]}, ${fmtD(t.from, { month: "short", day: "numeric" })}${nights ? "–" + fmtD(t.to, t.from.slice(0, 7) === t.to.slice(0, 7) ? { day: "numeric" } : { month: "short", day: "numeric" }) : ""}`;
+  t.when = `${fmtD(t.from, { month: "short", day: "numeric" })}${nights ? "–" + fmtD(t.to, t.from.slice(0, 7) === t.to.slice(0, 7) ? { day: "numeric" } : { month: "short", day: "numeric" }) : ""}`;
+  $("#tripTitle").textContent = `${KIND_EMOJI[t.kind || "trip"]} ${tripName(t)}, ${t.when}`;
   if (!tripData) { body.innerHTML = `<p class="tripsub">Checking the air in ${esc(t.place.name)}…</p>`; loadTrip(); return; }
   const fdays = toDays(tripData), list = [];
   for (let d = t.from; d <= t.to; d = addDays(d, 1)) {
@@ -213,6 +219,8 @@ function renderTrip() {
   body.innerHTML = `<p class="tripsub">${esc(t.place.name)}</p><div class="days tripdays">${cards}</div>${pack}
     ${far ? `<p class="note">Forecasts reach about 2 weeks out. Days marked "too far out" fill in as your trip gets closer.</p>` : early ? `<p class="note">Days more than a week out are an early look and can shift.</p>` : ""}
     ${S.remind.on && S.remind.hour ? `<p class="note">While you're there, your morning frizz report switches to ${esc(t.place.name.split(",")[0])} automatically.</p>` : ""}
+    <button class="btn berry" id="tripShare" type="button">Share with your group</button>
+    <p class="note" style="text-align:center;margin-top:-4px">Friends see the forecast tuned to their own hair.</p>
     <div class="row" style="margin-top:6px"><button class="link" id="tripEdit" type="button">Change trip</button><button class="link" id="tripDel" type="button">Remove trip</button></div>`;
 }
 $("#tripCard").addEventListener("input", e => {
@@ -242,12 +250,59 @@ $("#tripCard").addEventListener("click", e => {
     if (!from || !to) return err("Add your dates.");
     if (to < from) return err("Your leave date is before your arrival.");
     if (Math.round((Date.parse(to) - Date.parse(from)) / 864e5) > 20) return err("Keep it to 3 weeks or less.");
-    S.trip = { place: tripDraft.place, from, to }; tripDraft = null; tripData = null; save(); scheduleSync(); renderTrip();
+    S.trip = { place: tripDraft.place, from, to, kind: $("#tripKind").value, label: $("#tripLabel").value.replace(/[<>]/g, "").trim().slice(0, 40) }; tripDraft = null; tripData = null; save(); scheduleSync(); renderTrip();
     $("#tripCard").scrollIntoView({ behavior: "smooth", block: "start" }); toast("Trip added. Bon voyage, hair.");
   }
+  if (e.target.id === "tripShare") { shareTrip(); return; }
   if (e.target.id === "tripEdit") { tripDraft = { ...S.trip }; S.trip = null; save(); renderTrip(); }
   if (e.target.id === "tripDel") { S.trip = null; tripData = null; save(); scheduleSync(); renderTrip(); toast("Trip removed."); }
 });
+
+/* share a trip or event with friends: an image plus a link that opens FrizzDay with the event filled in */
+const b64u = o => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = s => JSON.parse(decodeURIComponent(escape(atob(s.replace(/-/g, "+").replace(/_/g, "/")))));
+function tripLink(t) { return `https://frizzday.com/?t=${b64u({ n: t.place.name, a: t.place.lat, o: t.place.lon, f: t.from, e: t.to, k: t.kind || "trip", l: t.label || "" })}`; }
+async function shareTrip() {
+  const t = S.trip; if (!t || !tripData) return;
+  const fdays = toDays(tripData), list = [];
+  for (let d = t.from; d <= t.to && list.length < 5; d = addDays(d, 1)) { const day = fdays.find(x => x.date === d); list.push({ d, ds: day ? dayScore(day, S.hair, S.porous, S.bias) : null }); }
+  const cs = getComputedStyle(document.documentElement), c = document.createElement("canvas"); c.width = 1080; c.height = 1350; const g = c.getContext("2d");
+  try { await document.fonts.ready; } catch {}
+  g.fillStyle = "#fbf3ef"; g.fillRect(0, 0, 1080, 1350); g.textAlign = "center";
+  g.font = "120px system-ui, sans-serif"; g.fillText(KIND_EMOJI[t.kind || "trip"], 540, 200);
+  g.fillStyle = "#2b1d2a"; g.font = "84px 'Instrument Serif', Georgia, serif"; const one = g.measureText(tripName(t)).width <= 940; wrap(g, tripName(t), 540, one ? 360 : 330, 940, 92);
+  g.fillStyle = "#7a6874"; g.font = "700 40px 'Plus Jakarta Sans', system-ui, sans-serif"; g.fillText(`${t.place.name} · ${t.when}`, 540, one ? 450 : 520);
+  g.fillStyle = "#2b1d2a"; g.font = "700 38px 'Plus Jakarta Sans', system-ui, sans-serif"; g.fillText("Frizz forecast", 540, 630);
+  const w = 180, gap = 18, x0 = 540 - (list.length * w + (list.length - 1) * gap) / 2;
+  list.forEach(({ d, ds }, i) => {
+    const x = x0 + i * (w + gap), l = ds ? level(ds.score) : 0, col = ds ? cs.getPropertyValue(LV[l]).trim() || "#b8336a" : "#b7a9b2";
+    g.fillStyle = "#f3e6e0"; g.beginPath(); g.roundRect ? g.roundRect(x, 670, w, 250, 28) : g.rect(x, 670, w, 250); g.fill();
+    g.fillStyle = "#7a6874"; g.font = "700 32px 'Plus Jakarta Sans', system-ui, sans-serif"; g.fillText(fmtD(d, { weekday: "short" }), x + w / 2, 730);
+    g.fillStyle = col; g.font = "800 110px 'Plus Jakarta Sans', system-ui, sans-serif"; g.fillText(ds ? Math.round(ds.score) : "?", x + w / 2, 850);
+    g.fillStyle = "#7a6874"; g.font = "600 24px 'Plus Jakarta Sans', system-ui, sans-serif"; g.fillText(ds ? "/10" : "soon", x + w / 2, 892);
+  });
+  g.fillStyle = "#2b1d2a"; g.font = "44px 'Plus Jakarta Sans', system-ui, sans-serif"; wrap(g, "Will your hair survive it? Get the forecast tuned to your hair type.", 540, 1040, 900, 58);
+  g.fillStyle = "#b8336a"; g.font = "64px 'Instrument Serif', Georgia, serif"; g.fillText("frizzday.com", 540, 1260);
+  const url = tripLink(t), text = `${tripName(t)} (${t.when}): here's the frizz forecast 💁 Tap to see it tuned to your hair:`;
+  const blob = await new Promise(r => c.toBlob(r, "image/png")), file = new File([blob], "frizzday-forecast.png", { type: "image/png" });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file], url })) { await navigator.share({ files: [file], text, url }); return; }
+    if (navigator.share) { await navigator.share({ text, url }); return; }
+  } catch (e) { if (e.name === "AbortError") return; }
+  try { await navigator.clipboard.writeText(`${text} ${url}`); toast("Link copied. Paste it in your group chat."); } catch { prompt("Copy this link:", url); }
+}
+/* opened from a friend's shared link */
+(() => {
+  const raw = new URLSearchParams(location.search).get("t"); if (!raw) return;
+  history.replaceState(null, "", location.pathname);
+  try {
+    const o = unb64u(raw), ok = d => /^\d{4}-\d{2}-\d{2}$/.test(d);
+    if (!isFinite(o.a) || !isFinite(o.o) || !ok(o.f) || !ok(o.e) || o.e < o.f) return;
+    S.trip = { place: { name: String(o.n || "").replace(/[<>]/g, "").slice(0, 60), lat: +o.a, lon: +o.o }, from: o.f, to: o.e, kind: KIND_EMOJI[o.k] ? o.k : "trip", label: String(o.l || "").replace(/[<>]/g, "").slice(0, 40) };
+    save(); window.__sharedTrip = true;
+    if (!(S.place && S.hair)) { const el = $("#invite"); el.hidden = false; el.innerHTML = `${KIND_EMOJI[S.trip.kind]} <b>${esc(tripName(S.trip))}</b> was shared with you. Pick your hair type and your city below, and you'll see the forecast for it tuned to your hair.`; }
+  } catch {}
+})();
 
 /* share card */
 $("#shareBtn").addEventListener("click", async () => {
@@ -335,5 +390,5 @@ let tt; function toast(m) { let t = $(".toast"); if (!t) { t = document.createEl
 if ("serviceWorker" in navigator && location.protocol === "https:") window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
 
 /* boot */
-if (S.place && S.hair) load(false); else showForecast();
+if (S.place && S.hair) load(false).then(() => { if (window.__sharedTrip) { window.__sharedTrip = false; setTimeout(() => $("#tripCard").scrollIntoView({ behavior: "smooth", block: "start" }), 300); toast("Added to your FrizzDay"); } }); else showForecast();
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && data && S.place) { const c = store.get("wx", null); if (!c || Date.now() - c.at > 30 * 6e4) load(true); else render(); } });

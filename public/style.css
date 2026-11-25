@@ -163,3 +163,6 @@ footer p{margin:0}
 .tripdates label{min-width:0}
 .tripdates input{-webkit-appearance:none;appearance:none;box-sizing:border-box;max-width:100%}
 .trip .btn{width:100%}
+
+.tripdates select{font:inherit;font-size:16px;color:var(--ink);background:var(--sunk);border:0;border-radius:14px;padding:12px;min-width:0;width:100%}
+.invite{margin:14px 0 0;background:var(--berry-soft);border-radius:16px;padding:12px 14px;font-size:15px;color:var(--ink)}
