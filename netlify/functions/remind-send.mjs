@@ -16,20 +16,22 @@ export default async () => {
       const morning = rec.hour && lp.hour === rec.hour && rec.lastSent !== lp.date;
       const evening = eve && lp.hour === eve && rec.lastEve !== lp.date && rec.lastRated !== lp.date;
       if (!morning && !evening) continue;
-      const k = `${rec.lat},${rec.lon}`;
-      if (!wx.has(k)) { const r = await fetch(forecastURL(rec.lat, rec.lon)); wx.set(k, r.ok ? await r.json() : null); }
+      // On a trip? Forecast where they are, not home.
+      const away = rec.trip && lp.date >= rec.trip.from && lp.date <= rec.trip.to ? rec.trip : null;
+      const at = away || rec, k = `${at.lat},${at.lon}`;
+      if (!wx.has(k)) { const r = await fetch(forecastURL(at.lat, at.lon)); wx.set(k, r.ok ? await r.json() : null); }
       const f = wx.get(k); if (!f) continue;
       const day = toDays(f).find(d => d.date === lp.date); if (!day) continue;
       const ds = dayScore(day, rec.hair, rec.porous, rec.bias); const L = level(ds.score);
       if (evening) {
         // The nightly check-in: it's what teaches FrizzDay this person's hair.
         const said = Math.round(ds.score);
-        const ev = { title: "How did your hair do today? 💁", body: `We called it ${said}/10 frizz${rec.name ? " in " + rec.name.split(",")[0] : ""}. Were we right? One tap makes tomorrow's forecast smarter.`, tag: "fd-eve-" + lp.date, url: "/?rate=" + lp.date };
+        const ev = { title: "How did your hair do today? 💁", body: `We called it ${said}/10 frizz${at.name ? " in " + at.name.split(",")[0] : ""}. Were we right? One tap makes tomorrow's forecast smarter.`, tag: "fd-eve-" + lp.date, url: "/?rate=" + lp.date };
         try { await webpush.sendNotification(rec.subscription, JSON.stringify(ev), { TTL: 3 * 3600 }); sent++; await store.setJSON(b.key, { ...rec, lastEve: lp.date }); }
         catch (e) { if (e && (e.statusCode === 404 || e.statusCode === 410)) { await store.delete(b.key); removed++; } }
         continue;
       }
-      const payload = { title: `${EMOJI[L]} Frizz ${Math.round(ds.score)}/10 today${rec.name ? " in " + rec.name.split(",")[0] : ""}`, body: `${LEVEL_NAMES[L]}. ${verdict(ds, lp.date + rec.hair)} ${ds.window}.`, tag: "fd-" + lp.date, url: "/" };
+      const payload = { title: `${EMOJI[L]} Frizz ${Math.round(ds.score)}/10 today${at.name ? " in " + at.name.split(",")[0] : ""}`, body: `${LEVEL_NAMES[L]}. ${verdict(ds, lp.date + rec.hair)} ${ds.window}.`, tag: "fd-" + lp.date, url: "/" };
       try { await webpush.sendNotification(rec.subscription, JSON.stringify(payload), { TTL: 3 * 3600, urgency: "high" }); sent++; await store.setJSON(b.key, { ...rec, lastSent: lp.date }); }
       catch (e) { if (e && (e.statusCode === 404 || e.statusCode === 410)) { await store.delete(b.key); removed++; } }
     } catch { /* keep going */ }

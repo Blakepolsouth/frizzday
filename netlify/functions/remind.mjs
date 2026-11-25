@@ -23,6 +23,8 @@ export default async (req) => {
     lat: +(+b.lat).toFixed(2), lon: +(+b.lon).toFixed(2), name: String(b.name || "").replace(/[<>\u0000-\u001f]/g, "").slice(0, 60),
     hair: HAIR[b.hair] ? b.hair : "wavy", porous: !!b.porous, bias: Math.max(-3, Math.min(3, +b.bias || 0)),
     hour: [0, 5, 6, 7, 8, 9, 10].includes(+b.hour) ? +b.hour : 7, eve: [0, 17, 18, 19, 20, 21].includes(+b.eve) ? +b.eve : b.eve == null ? 19 : 0,
+    trip: b.trip && isFinite(b.trip.lat) && isFinite(b.trip.lon) && /^\d{4}-\d{2}-\d{2}$/.test(b.trip.from || "") && /^\d{4}-\d{2}-\d{2}$/.test(b.trip.to || "")
+      ? { name: String(b.trip.name || "").replace(/[<>\u0000-\u001f]/g, "").slice(0, 60), lat: +(+b.trip.lat).toFixed(2), lon: +(+b.trip.lon).toFixed(2), from: b.trip.from, to: b.trip.to } : null,
     lastRated: /^\d{4}-\d{2}-\d{2}$/.test(b.lastRated || "") ? b.lastRated : prev?.lastRated || "", lastEve: prev?.lastEve || "", tz: validTz(b.tz) ? b.tz : "America/New_York",
     lastSent: prev?.lastSent || "", updated: Date.now()
   };

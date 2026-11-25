@@ -80,7 +80,7 @@ const localNow = () => { const d = new Date(Date.now() + (data?.utc_offset_secon
 function showForecast() {
   const has = !!(S.place && S.hair);
   $("#intro").hidden = has; $("#setup").hidden = has;
-  ["#hero", "#hourlyCard", "#tipsCard", "#daysCard", "#rateCard", "#remindCard", "#actions", "#whyCard", "#placeBtn"].forEach(s => $(s).hidden = !has);
+  ["#hero", "#hourlyCard", "#tipsCard", "#daysCard", "#rateCard", "#remindCard", "#actions", "#tripCard", "#whyCard", "#placeBtn"].forEach(s => $(s).hidden = !has);
   if (has) $("#placeName").textContent = S.place.name;
 }
 function render() {
@@ -114,7 +114,7 @@ function render() {
 
   const tds = sel === 0 ? ds : dayScore(days[0], S.hair, S.porous, S.bias);
   if (days[0].date === now.date && tds) { const prev = S.seen[now.date], sc = Math.round(tds.score * 10) / 10; if (!prev || prev.s !== sc) { S.seen[now.date] = { s: sc, b: S.bias }; const k = Object.keys(S.seen).sort(); while (k.length > 30) delete S.seen[k.shift()]; save(); } }
-  renderRate(); renderRemind();
+  renderRate(); renderRemind(); renderTrip();
 }
 $("#hero").addEventListener("click", e => {
   const t = e.target.closest("[data-d]"); if (t) { sel = +t.dataset.d; render(); return; }
@@ -165,6 +165,90 @@ $(".rates").addEventListener("click", e => {
   toast(rate === 3 && score < 5 ? "Noted. We'll be stricter for your hair." : rate === 1 && score > 5 ? "Lucky! We'll go easier on your hair." : count < GOAL ? `Got it. ${count} of ${GOAL} days, FrizzDay is learning you.` : "Got it. Thanks!");
 });
 
+/* trip: frizz forecast for where you're headed */
+const TRIP_DAYS = 16; // how far ahead the forecast reaches
+let tripData = null, tripSt, tripDraft = null;
+const tripURL = (lat, lon) => forecastURL(lat, lon).replace("forecast_days=4", "forecast_days=" + TRIP_DAYS);
+const fmtD = (s, o = { weekday: "short", month: "short", day: "numeric" }) => new Date(s + "T12:00").toLocaleDateString("en-US", o);
+function tripLive() { const t = S.trip; if (!t) return null; if (t.to < localNow().date) { S.trip = null; save(); scheduleSync(); return null; } return t; }
+async function loadTrip() {
+  const t = S.trip; if (!t) return;
+  const key = `${t.place.lat},${t.place.lon}`, c = store.get("tripwx", null);
+  if (c && c.key === key && Date.now() - c.at < 60 * 6e4) { tripData = c.data; return renderTrip(); }
+  try { const r = await fetch(tripURL(t.place.lat, t.place.lon)); if (!r.ok) throw 0; tripData = await r.json(); store.set("tripwx", { key, at: Date.now(), data: tripData }); }
+  catch { tripData = c && c.key === key ? c.data : null; }
+  renderTrip();
+}
+function renderTrip() {
+  const body = $("#tripBody"); if (!body) return;
+  const t = tripLive(), today = localNow().date, maxD = addDays(today, TRIP_DAYS - 1);
+  if (!t) {
+    const d = tripDraft || { from: today, to: addDays(today, 2) };
+    $("#tripTitle").textContent = "Taking your hair on a trip?";
+    body.innerHTML = `<p class="tripsub">Add where you're going and your dates. You'll get a frizz score for each day you're there, plus what to pack.</p>
+      <div class="search"><input id="tripCity" type="search" placeholder="Where are you headed?" autocomplete="off" aria-label="Trip city" value="${esc(d.place?.name || "")}"><ul class="sugg" id="tripSugg" hidden></ul></div>
+      <div class="tripdates"><label><span>Arrive</span><input type="date" id="tripFrom" value="${d.from}" min="${today}" max="${maxD}"></label><label><span>Leave</span><input type="date" id="tripTo" value="${d.to}" min="${today}"></label></div>
+      <button class="btn" id="tripSave" type="button">See my trip forecast</button><p class="note" id="tripErr" hidden></p>`;
+    return;
+  }
+  const nights = Math.round((Date.parse(t.to) - Date.parse(t.from)) / 864e5);
+  $("#tripTitle").textContent = `${t.place.name.split(",")[0]}, ${fmtD(t.from, { month: "short", day: "numeric" })}${nights ? "–" + fmtD(t.to, t.from.slice(0, 7) === t.to.slice(0, 7) ? { day: "numeric" } : { month: "short", day: "numeric" }) : ""}`;
+  if (!tripData) { body.innerHTML = `<p class="tripsub">Checking the air in ${esc(t.place.name)}…</p>`; loadTrip(); return; }
+  const fdays = toDays(tripData), list = [];
+  for (let d = t.from; d <= t.to; d = addDays(d, 1)) {
+    const day = fdays.find(x => x.date === d), ds = day ? dayScore(day, S.hair, S.porous, S.bias) : null;
+    list.push({ d, ds });
+  }
+  const known = list.filter(x => x.ds), worst = known.slice().sort((a, b) => b.ds.score - a.ds.score)[0];
+  const home = toDays(data).find(x => x.date === today), homeS = home ? dayScore(home, S.hair, S.porous, S.bias)?.score : null;
+  const cards = list.map(({ d, ds }) => { if (!ds) return `<div class="dcard tday"><span>${fmtD(d, { weekday: "short" })} ${fmtD(d, { month: "numeric", day: "numeric" })}</span><b style="color:var(--muted)">–</b><span>${d > maxD ? "Too far out" : "No data"}</span></div>`;
+    const l = level(ds.score); return `<div class="dcard tday" style="--lv:var(${LV[l]})"><span>${fmtD(d, { weekday: "short" })} ${fmtD(d, { month: "numeric", day: "numeric" })}</span><b>${Math.round(ds.score)}</b><span>${LEVEL_NAMES[l]}</span></div>`; }).join("");
+  const far = list.some(x => !x.ds && x.d > maxD), early = known.some(x => x.d > addDays(today, 6));
+  let pack = "";
+  if (worst) {
+    const [tt, tb] = tips(worst.ds, S.hair)[0] || [];
+    const cmp = homeS != null && known.length ? (() => { const avg = known.reduce((a, x) => a + x.ds.score, 0) / known.length, diff = avg - homeS; return Math.abs(diff) < 1 ? "About the same frizz as home." : diff >= 4 ? "Way frizzier than home, so pack your heavy hitters." : diff > 0 ? `A little frizzier than home.` : `Easier on your hair than home.`; })() : "";
+    pack = `<div class="pack"><div class="label">What to pack</div><p><b>Worst day: ${fmtD(worst.d, { weekday: "long" })} (${Math.round(worst.ds.score)}/10).</b> ${esc(verdict(worst.ds, worst.d + S.hair))} ${esc(cmp)}</p>${tt ? `<p><b>${esc(tt)}.</b> ${esc(tb)}</p>` : ""}</div>`;
+  }
+  body.innerHTML = `<p class="tripsub">${esc(t.place.name)}</p><div class="days tripdays">${cards}</div>${pack}
+    ${far ? `<p class="note">Forecasts reach about 2 weeks out. Days marked "too far out" fill in as your trip gets closer.</p>` : early ? `<p class="note">Days more than a week out are an early look and can shift.</p>` : ""}
+    ${S.remind.on && S.remind.hour ? `<p class="note">While you're there, your morning frizz report switches to ${esc(t.place.name.split(",")[0])} automatically.</p>` : ""}
+    <div class="row" style="margin-top:6px"><button class="link" id="tripEdit" type="button">Change trip</button><button class="link" id="tripDel" type="button">Remove trip</button></div>`;
+}
+$("#tripCard").addEventListener("input", e => {
+  if (e.target.id !== "tripCity") return;
+  clearTimeout(tripSt); const q = e.target.value.trim(), box = $("#tripSugg");
+  tripDraft = { ...(tripDraft || {}), place: null };
+  if (q.length < 2) { box.hidden = true; return; }
+  tripSt = setTimeout(async () => {
+    try {
+      const r = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=6&language=en&format=json`)).json(), list = r.results || [];
+      box.innerHTML = list.length ? list.map((x, i) => `<li><button type="button" data-i="${i}">${esc(x.name)} <small>${esc([x.admin1, x.country_code === "US" ? "" : x.country].filter(Boolean).join(", "))}</small></button></li>`).join("") : `<li><button type="button" disabled>No matches</button></li>`;
+      box.hidden = false; box._list = list;
+    } catch {}
+  }, 250);
+});
+$("#tripCard").addEventListener("change", e => {
+  if (e.target.id === "tripFrom") { const f = e.target.value, to = $("#tripTo"); to.min = f; if (to.value < f) to.value = f; }
+});
+$("#tripCard").addEventListener("click", e => {
+  const s = e.target.closest("#tripSugg button[data-i]");
+  if (s) { const x = $("#tripSugg")._list[+s.dataset.i], abbr = x.country_code === "US" && x.admin1 ? (US[x.admin1] || x.admin1) : x.country;
+    tripDraft = { ...(tripDraft || {}), place: { name: `${x.name}${abbr ? ", " + abbr : ""}`, lat: +x.latitude.toFixed(3), lon: +x.longitude.toFixed(3) } };
+    $("#tripCity").value = tripDraft.place.name; $("#tripSugg").hidden = true; return; }
+  if (e.target.id === "tripSave") {
+    const from = $("#tripFrom").value, to = $("#tripTo").value, err = m => { $("#tripErr").textContent = m; $("#tripErr").hidden = false; };
+    if (!tripDraft?.place) return err("Pick your destination from the list.");
+    if (!from || !to) return err("Add your dates.");
+    if (to < from) return err("Your leave date is before your arrival.");
+    if (Math.round((Date.parse(to) - Date.parse(from)) / 864e5) > 20) return err("Keep it to 3 weeks or less.");
+    S.trip = { place: tripDraft.place, from, to }; tripDraft = null; tripData = null; save(); scheduleSync(); renderTrip();
+    $("#tripCard").scrollIntoView({ behavior: "smooth", block: "start" }); toast("Trip added. Bon voyage, hair.");
+  }
+  if (e.target.id === "tripEdit") { tripDraft = { ...S.trip }; S.trip = null; save(); renderTrip(); }
+  if (e.target.id === "tripDel") { S.trip = null; tripData = null; save(); scheduleSync(); renderTrip(); toast("Trip removed."); }
+});
+
 /* share card */
 $("#shareBtn").addEventListener("click", async () => {
   const d = days[sel], ds = dayScore(d, S.hair, S.porous, S.bias), L = level(ds.score);
@@ -211,7 +295,7 @@ async function sync(confirm) {
   try {
     const sub = await subscription();
     const r = await fetch("/api/remind", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "on", subscription: sub.toJSON(), confirm: !!confirm,
-      lat: S.place.lat, lon: S.place.lon, name: S.place.name, hair: S.hair, porous: S.porous, bias: S.bias, hour: S.remind.hour, eve: S.remind.eve, lastRated: Object.keys(S.ratings).sort().pop() || "", tz: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
+      lat: S.place.lat, lon: S.place.lon, name: S.place.name, hair: S.hair, porous: S.porous, bias: S.bias, hour: S.remind.hour, eve: S.remind.eve, trip: S.trip ? { name: S.trip.place.name, lat: S.trip.place.lat, lon: S.trip.place.lon, from: S.trip.from, to: S.trip.to } : null, lastRated: Object.keys(S.ratings).sort().pop() || "", tz: Intl.DateTimeFormat().resolvedOptions().timeZone }) });
     if (r.status === 410) { await sub.unsubscribe(); return sync(confirm); }
     if (!r.ok) throw 0;
   } catch { if (confirm) { S.remind.on = false; save(); renderRemind(); toast("Couldn't turn that on. Try again in a moment."); } }
